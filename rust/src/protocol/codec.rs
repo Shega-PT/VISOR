@@ -1,24 +1,10 @@
-///!
-
-//! # Codec TLV — Serialização, Validação e Parsing
+//! # Codec ACP — Serialização, Validação e Parsing (v3.0.0)
 //!
 //! Este módulo implementa as operações fundamentais de serialização,
-//! validação e parsing de mensagens TLV (Type-Length-Value).
-//!
-//! ## Operações Principais
-//!
-//! - `build_tlv` — Serializa um campo TLV individual
-//! - `build_message` — Serializa uma mensagem TLV completa
-//! - `validate_message` — Valida integridade e estrutura de uma mensagem
-//! - `parse_tlv` — Deserializa campos TLV de bytes brutos
-//!
-//! ## Nota sobre Endianness
-//!
-//! Todos os campos multi-byte utilizam little-endian (LE), compatível
-//! com a arquitetura ESP32 (Xtensa, little-endian).
+//! validação e parsing de mensagens ACP (AERUS Communication Protocol) v3.0.0.
 
 use crate::protocol::types::*;
-use crate::protocol::crc8::calc_crc8;
+use crate::protocol::crc16::calc_crc16;
 
 /// Erros possíveis nas operações de codec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +15,16 @@ pub enum ProtocolError {
     TooManyFields,
     /// Byte de início inválido na mensagem.
     InvalidStartByte,
+    /// Versão do protocolo incompatível.
+    InvalidVersion,
     /// ID da mensagem inválido.
     InvalidMsgId,
     /// Tamanho do campo TLV inválido.
     InvalidTlvLength,
-    /// Checksum CRC8 inválido.
+    /// Checksum CRC16 inválido.
     InvalidChecksum,
+    /// Assinatura inválida.
+    InvalidSignature,
     /// Dados de entrada corrompidos ou incompletos.
     CorruptedData,
     /// Campo TLV com tamanho maior que o permitido.
@@ -51,9 +41,9 @@ pub enum ProtocolError {
 ///
 /// # Arguments
 ///
-/// * `id` - Identificador do campo TLV.
-/// * `data` - Dados do campo.
-/// * `output` - Buffer de saída.
+/// * `id` — FieldID codificado ([TYPE:3][ID:5]).
+/// * `data` — Dados do campo.
+/// * `output` — Buffer de saída.
 ///
 /// # Returns
 ///
@@ -80,8 +70,8 @@ pub fn build_tlv(id: u8, data: &[u8], output: &mut [u8]) -> Result<usize, Protoc
 ///
 /// # Arguments
 ///
-/// * `data` - Dados do campo de vídeo.
-/// * `output` - Buffer de saída.
+/// * `data` — Dados do campo de vídeo.
+/// * `output` — Buffer de saída.
 ///
 /// # Returns
 ///
@@ -102,15 +92,20 @@ pub fn build_tlv_video(data: &[u8], output: &mut [u8]) -> Result<usize, Protocol
     Ok(required_size)
 }
 
-/// Serializa uma mensagem TLV completa a partir de uma struct TLVMessage.
+/// Serializa uma mensagem ACP completa a partir de uma struct TLVMessage.
 ///
-/// Formato resultante: `[START_BYTE][MSGID][TLV_COUNT][TLV_FIELDS...][CRC8]`
+/// Formato resultante:
+/// ```text
+/// [START_BYTE][VERSION][NODE_ID][MSG_ID][SEQ_NUM(2)][TLV_COUNT]
+/// [TLV_FIELDS...][SIGNATURE][CRC16(2)]
+/// ```
 ///
 /// # Arguments
 ///
-/// * `msg` - Mensagem TLV a serializar.
-/// * `msg_id` - Identificador do tipo de mensagem (sobrepõe `msg.msg_id`).
-/// * `buffer` - Buffer de saída.
+/// * `msg` — Mensagem ACP a serializar.
+/// * `msg_id` — Identificador do tipo de mensagem (sobrepõe `msg.msg_id`).
+/// * `signature_key` — Chave de assinatura (XOR key).
+/// * `buffer` — Buffer de saída.
 ///
 /// # Returns
 ///
@@ -118,11 +113,14 @@ pub fn build_tlv_video(data: &[u8], output: &mut [u8]) -> Result<usize, Protocol
 pub fn build_message(
     msg: &TLVMessage,
     msg_id: u8,
+    signature_key: u8,
     buffer: &mut [u8],
 ) -> Result<usize, ProtocolError> {
-    let required_size = MESSAGE_HEADER_SIZE
-        + (msg.tlv_count as usize) * (TLV_HEADER_SIZE + MAX_TLV_DATA)
-        + CHECKSUM_SIZE;
+    // Calcular tamanho necessário baseado no LEN real de cada TLV
+    let fields_size: usize = (0..msg.tlv_count as usize)
+        .map(|i| TLV_HEADER_SIZE + msg.tlvs[i].len as usize)
+        .sum();
+    let required_size = ACP_HEADER_SIZE + fields_size + SIGNATURE_SIZE + CRC16_SIZE;
 
     if buffer.len() < required_size {
         return Err(ProtocolError::BufferTooSmall);
@@ -130,15 +128,27 @@ pub fn build_message(
 
     let mut offset = 0;
 
-    // Cabeçalho da mensagem
+    // --- Cabeçalho ACP (7 bytes) ---
     buffer[offset] = START_BYTE;
+    offset += 1;
+    buffer[offset] = ACP_VERSION;
+    offset += 1;
+    buffer[offset] = msg.node_id;
     offset += 1;
     buffer[offset] = msg_id;
     offset += 1;
+
+    // SEQ_NUM (2 bytes, little-endian)
+    let seq_bytes = msg.seq_num.to_le_bytes();
+    buffer[offset] = seq_bytes[0];
+    offset += 1;
+    buffer[offset] = seq_bytes[1];
+    offset += 1;
+
     buffer[offset] = msg.tlv_count;
     offset += 1;
 
-    // Campos TLV
+    // --- Campos TLV ---
     for i in 0..msg.tlv_count as usize {
         let tlv = &msg.tlvs[i];
         buffer[offset] = tlv.id;
@@ -150,9 +160,22 @@ pub fn build_message(
         offset += len;
     }
 
-    // CRC8
-    let crc = calc_crc8(&buffer[..offset]);
-    buffer[offset] = crc;
+    // --- Assinatura ---
+    let signature = compute_signature(
+        signature_key,
+        msg_id,
+        seq_bytes[0],
+        seq_bytes[1],
+    );
+    buffer[offset] = signature;
+    offset += 1;
+
+    // --- CRC16 ---
+    let crc = calc_crc16(&buffer[..offset]);
+    let crc_bytes = crc.to_le_bytes();
+    buffer[offset] = crc_bytes[0];
+    offset += 1;
+    buffer[offset] = crc_bytes[1];
     offset += 1;
 
     Ok(offset)
@@ -162,27 +185,29 @@ pub fn build_message(
 // FUNÇÕES DE VALIDAÇÃO
 // ============================================================================
 
-/// Valida a integridade e estrutura de uma mensagem TLV serializada.
+/// Valida a integridade e estrutura de uma mensagem ACP serializada.
 ///
 /// Verifica:
-/// 1. Byte de início (START_BYTE)
-/// 2. ID da mensagem válido
-/// 3. Número de campos TLV dentro do limite
-/// 4. Checksum CRC8
-/// 5. IDs dos campos TLV válidos
-/// 6. Tamanhos dos campos TLV dentro dos limites
+/// 1. Tamanho mínimo
+/// 2. Byte de início (START_BYTE = 0xAA)
+/// 3. Versão do protocolo (ACP_VERSION = 0x03)
+/// 4. ID da mensagem válido
+/// 5. Número de campos TLV dentro do limite
+/// 6. Checksum CRC16
+/// 7. IDs dos campos TLV válidos
+/// 8. Tamanhos dos campos TLV dentro dos limites
 ///
 /// # Arguments
 ///
-/// * `buffer` - Buffer contendo a mensagem serializada.
+/// * `buffer` — Buffer contendo a mensagem serializada.
 ///
 /// # Returns
 ///
 /// `Ok(tlv_count)` em sucesso (número de campos TLV válidos),
 /// `Err(ProtocolError)` em caso de erro.
 pub fn validate_message(buffer: &[u8]) -> Result<u8, ProtocolError> {
-    // Verificar tamanho mínimo
-    if buffer.len() < MESSAGE_HEADER_SIZE + CHECKSUM_SIZE {
+    // Verificar tamanho mínimo: header(7) + signature(1) + crc16(2) = 10
+    if buffer.len() < ACP_OVERHEAD {
         return Err(ProtocolError::CorruptedData);
     }
 
@@ -191,44 +216,64 @@ pub fn validate_message(buffer: &[u8]) -> Result<u8, ProtocolError> {
         return Err(ProtocolError::InvalidStartByte);
     }
 
+    // Verificar versão
+    if buffer[1] != ACP_VERSION {
+        return Err(ProtocolError::InvalidVersion);
+    }
+
     // Verificar ID da mensagem
-    let msg_id = buffer[1];
+    let msg_id = buffer[3];
     if !MsgId::is_valid(msg_id) {
         return Err(ProtocolError::InvalidMsgId);
     }
 
     // Verificar número de campos TLV
-    let tlv_count = buffer[2];
+    let tlv_count = buffer[6];
     if tlv_count as usize > MAX_TLV_FIELDS {
         return Err(ProtocolError::InvalidTlvLength);
     }
 
-    // Verificar CRC8
-    let total_size = MESSAGE_HEADER_SIZE
-        + (tlv_count as usize) * (TLV_HEADER_SIZE + MAX_TLV_DATA)
-        + CHECKSUM_SIZE;
-
-    if buffer.len() < total_size {
-        return Err(ProtocolError::CorruptedData);
-    }
-
-    let crc_offset = total_size - 1;
-    let expected_crc = calc_crc8(&buffer[..crc_offset]);
-    if buffer[crc_offset] != expected_crc {
-        return Err(ProtocolError::InvalidChecksum);
-    }
-
-    // Validar campos TLV
-    let mut offset = MESSAGE_HEADER_SIZE;
+    // Calcular tamanho total da mensagem baseado no LEN real de cada TLV
+    let mut calculated_size = ACP_HEADER_SIZE;
+    let mut offset = ACP_HEADER_SIZE;
     for _ in 0..tlv_count {
         if offset + TLV_HEADER_SIZE > buffer.len() {
             return Err(ProtocolError::CorruptedData);
         }
+        let field_len = buffer[offset + 1] as usize;
+        if field_len > MAX_TLV_DATA {
+            return Err(ProtocolError::TlvDataTooLong);
+        }
+        offset += TLV_HEADER_SIZE + field_len;
+        calculated_size += TLV_HEADER_SIZE + field_len;
+    }
 
+    // Adicionar signature + crc16
+    calculated_size += SIGNATURE_SIZE + CRC16_SIZE;
+
+    if buffer.len() < calculated_size {
+        return Err(ProtocolError::CorruptedData);
+    }
+
+    // Verificar CRC16 (últimos 2 bytes)
+    let crc_offset = calculated_size - CRC16_SIZE;
+    let crc_lo = buffer[crc_offset];
+    let crc_hi = buffer[crc_offset + 1];
+    let expected_crc = (crc_hi as u16) << 8 | (crc_lo as u16);
+    let computed_crc = calc_crc16(&buffer[..crc_offset]);
+    if computed_crc != expected_crc {
+        return Err(ProtocolError::InvalidChecksum);
+    }
+
+    // Validar campos TLV (IDs e tamanhos)
+    offset = ACP_HEADER_SIZE;
+    for _ in 0..tlv_count {
         let field_id = buffer[offset];
         let field_len = buffer[offset + 1] as usize;
 
-        if !FieldId::is_valid(field_id) {
+        // Validar tipo do FieldID
+        let (field_type, _) = field_id_decode(field_id);
+        if AcpFieldType::from_u8(field_type).is_none() {
             return Err(ProtocolError::InvalidTlvLength);
         }
 
@@ -242,6 +287,34 @@ pub fn validate_message(buffer: &[u8]) -> Result<u8, ProtocolError> {
     Ok(tlv_count)
 }
 
+/// Valida a assinatura de uma mensagem ACP serializada.
+///
+/// # Arguments
+///
+/// * `buffer` — Mensagem serializada (com signature já incluída).
+/// * `signature_key` — Chave de assinatura esperada.
+///
+/// # Returns
+///
+/// `Ok(())` se a assinatura é válida, `Err(ProtocolError::InvalidSignature)` caso contrário.
+pub fn validate_signature_in_message(buffer: &[u8], signature_key: u8) -> Result<(), ProtocolError> {
+    if buffer.len() < ACP_OVERHEAD {
+        return Err(ProtocolError::CorruptedData);
+    }
+
+    let msg_id = buffer[3];
+    let seq_lo = buffer[4];
+    let seq_hi = buffer[5];
+    let signature = buffer[buffer.len() - CRC16_SIZE - SIGNATURE_SIZE];
+
+    let expected = compute_signature(signature_key, msg_id, seq_lo, seq_hi);
+    if signature != expected {
+        return Err(ProtocolError::InvalidSignature);
+    }
+
+    Ok(())
+}
+
 // ============================================================================
 // FUNÇÕES DE PARSING
 // ============================================================================
@@ -253,8 +326,8 @@ pub fn validate_message(buffer: &[u8]) -> Result<u8, ProtocolError> {
 ///
 /// # Arguments
 ///
-/// * `data` - Buffer com campos TLV serializados.
-/// * `output` - Array de saída para os campos TLV deserializados.
+/// * `data` — Buffer com campos TLV serializados.
+/// * `output` — Array de saída para os campos TLV deserializados.
 ///
 /// # Returns
 ///
@@ -299,7 +372,19 @@ pub fn parse_tlv(data: &[u8], output: &mut [TLVField]) -> Result<usize, Protocol
 pub fn print_tlv_field(field: &TLVField) {
     #[cfg(feature = "std")]
     {
-        print!("[TLV] ID=0x{:02X} LEN={}", field.id, field.len);
+        let (field_type, _field_id) = field_id_decode(field.id);
+        let type_name = match AcpFieldType::from_u8(field_type) {
+            Some(AcpFieldType::Raw) => "raw",
+            Some(AcpFieldType::Float32) => "f32",
+            Some(AcpFieldType::Float16) => "f16",
+            Some(AcpFieldType::Int32) => "i32",
+            Some(AcpFieldType::Uint32) => "u32",
+            Some(AcpFieldType::Uint16) => "u16",
+            Some(AcpFieldType::Uint8) => "u8",
+            Some(AcpFieldType::Bool) => "bool",
+            None => "???",
+        };
+        print!("[TLV] ID=0x{:02X} TYPE={}({}) LEN={}", field.id, type_name, field_type, field.len);
         if field.len > 0 && (field.len as usize) <= field.data.len() {
             print!(" DATA=[");
             for i in 0..field.len as usize {
@@ -314,14 +399,15 @@ pub fn print_tlv_field(field: &TLVField) {
     }
 }
 
-/// Imprime informações de debug sobre uma mensagem TLV.
+/// Imprime informações de debug sobre uma mensagem ACP.
 ///
 /// Útil para depuração. Em produção, pode ser desativado.
 pub fn print_message(msg: &TLVMessage) {
     #[cfg(feature = "std")]
     {
-        println!("[MSG] START=0x{:02X} MSGID=0x{:02X} TLV_COUNT={} CRC=0x{:02X}",
-            msg.start_byte, msg.msg_id, msg.tlv_count, msg.checksum);
+        println!("[ACP] START=0x{:02X} VER=0x{:02X} NODE=0x{:02X} MSGID=0x{:02X} SEQ={} TLV_COUNT={} SIG=0x{:02X} CRC=0x{:04X}",
+            msg.start_byte, msg.version, msg.node_id, msg.msg_id,
+            msg.seq_num, msg.tlv_count, msg.signature, msg.checksum);
         for i in 0..msg.tlv_count as usize {
             print_tlv_field(&msg.tlvs[i]);
         }
@@ -335,14 +421,15 @@ pub fn print_message(msg: &TLVMessage) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::builder::TLVBuilder;
 
     #[test]
     fn test_build_tlv() {
         let data = [0x01, 0x02, 0x03];
         let mut output = [0u8; 100];
-        let size = build_tlv(0x70, &data, &mut output).unwrap();
+        let size = build_tlv(0xC0, &data, &mut output).unwrap();
 
-        assert_eq!(output[0], 0x70);  // id
+        assert_eq!(output[0], 0xC0);  // id
         assert_eq!(output[1], 3);     // len
         assert_eq!(output[2], 0x01);  // data[0]
         assert_eq!(output[3], 0x02);  // data[1]
@@ -363,27 +450,28 @@ mod tests {
 
     #[test]
     fn test_build_message() {
-        let mut msg = TLVMessage::with_id(0x11);
+        let mut msg = TLVMessage::with_params(0x11, 0x06);
         msg.tlv_count = 1;
-        msg.tlvs[0] = TLVField::with_data(0x70, &[0x02]);
+        msg.tlvs[0] = TLVField::with_data(0xC0, &[0x02]);
 
-        let mut buffer = [0u8; 1093];
-        let size = build_message(&msg, 0x11, &mut buffer).unwrap();
+        let mut buffer = [0u8; 1098];
+        let size = build_message(&msg, 0x11, 0x42, &mut buffer).unwrap();
 
         assert_eq!(buffer[0], START_BYTE);
-        assert_eq!(buffer[1], 0x11);
-        assert_eq!(buffer[2], 1);
+        assert_eq!(buffer[1], ACP_VERSION);
+        assert_eq!(buffer[2], 0x06);
+        assert_eq!(buffer[3], 0x11);
         assert!(size > 0);
     }
 
     #[test]
     fn test_validate_message_ok() {
-        let mut msg = TLVMessage::with_id(0x11);
-        msg.tlv_count = 1;
-        msg.tlvs[0] = TLVField::with_data(0x70, &[0x02]);
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
+        builder.set_seq(1);
 
-        let mut buffer = [0u8; 1093];
-        let size = build_message(&msg, 0x11, &mut buffer).unwrap();
+        let mut buffer = [0u8; 1098];
+        let size = builder.build(0x11, &mut buffer).unwrap();
 
         let result = validate_message(&buffer[..size]);
         assert!(result.is_ok());
@@ -392,21 +480,38 @@ mod tests {
 
     #[test]
     fn test_validate_message_invalid_start() {
-        let mut buffer = [0u8; 1093];
+        let mut buffer = [0u8; 1098];
         buffer[0] = 0x00;  // Byte de início inválido
-        buffer[1] = 0x11;
-        buffer[2] = 0;
+        buffer[1] = ACP_VERSION;
+        buffer[2] = 0x06;
+        buffer[3] = 0x11;
+        buffer[4] = 0;
+        buffer[5] = 0;
+        buffer[6] = 0;
 
         let result = validate_message(&buffer);
         assert_eq!(result, Err(ProtocolError::InvalidStartByte));
     }
 
     #[test]
-    fn test_validate_message_invalid_msg_id() {
-        let mut buffer = [0u8; 1093];
+    fn test_validate_message_invalid_version() {
+        let mut buffer = [0u8; 1098];
         buffer[0] = START_BYTE;
-        buffer[1] = 0xFF;  // ID inválido
-        buffer[2] = 0;
+        buffer[1] = 0x99;  // Versão inválida
+        buffer[2] = 0x06;
+        buffer[3] = 0x11;
+
+        let result = validate_message(&buffer);
+        assert_eq!(result, Err(ProtocolError::InvalidVersion));
+    }
+
+    #[test]
+    fn test_validate_message_invalid_msg_id() {
+        let mut buffer = [0u8; 1098];
+        buffer[0] = START_BYTE;
+        buffer[1] = ACP_VERSION;
+        buffer[2] = 0x06;
+        buffer[3] = 0xFF;  // ID inválido
 
         let result = validate_message(&buffer);
         assert_eq!(result, Err(ProtocolError::InvalidMsgId));
@@ -414,11 +519,11 @@ mod tests {
 
     #[test]
     fn test_validate_message_invalid_crc() {
-        let mut msg = TLVMessage::with_id(0x11);
-        msg.tlv_count = 0;
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
 
-        let mut buffer = [0u8; 1093];
-        let size = build_message(&msg, 0x11, &mut buffer).unwrap();
+        let mut buffer = [0u8; 1098];
+        let size = builder.build(0x11, &mut buffer).unwrap();
 
         // Corromper CRC
         buffer[size - 1] = buffer[size - 1].wrapping_add(1);
@@ -428,17 +533,44 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_signature_ok() {
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
+        builder.set_seq(42);
+
+        let mut buffer = [0u8; 1098];
+        let size = builder.build(0x11, &mut buffer).unwrap();
+
+        assert!(validate_signature_in_message(&buffer[..size], 0x42).is_ok());
+    }
+
+    #[test]
+    fn test_validate_signature_wrong_key() {
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
+        builder.set_seq(42);
+
+        let mut buffer = [0u8; 1098];
+        let size = builder.build(0x11, &mut buffer).unwrap();
+
+        assert_eq!(
+            validate_signature_in_message(&buffer[..size], 0x43),
+            Err(ProtocolError::InvalidSignature)
+        );
+    }
+
+    #[test]
     fn test_parse_tlv() {
         let mut tlv_buf = [0u8; 100];
         let mut offset = 0;
-        offset += build_tlv(0x70, &[0x02], &mut tlv_buf[offset..]).unwrap();
+        offset += build_tlv(0xC0, &[0x02], &mut tlv_buf[offset..]).unwrap();
         offset += build_tlv(0x30, &float_to_bytes(1.5), &mut tlv_buf[offset..]).unwrap();
 
         let mut output = [TLVField::new(); 10];
         let count = parse_tlv(&tlv_buf[..offset], &mut output).unwrap();
 
         assert_eq!(count, 2);
-        assert_eq!(output[0].id, 0x70);
+        assert_eq!(output[0].id, 0xC0);
         assert_eq!(output[0].len, 1);
         assert_eq!(output[1].id, 0x30);
         assert_eq!(output[1].len, 4);
@@ -453,17 +585,46 @@ mod tests {
 
     #[test]
     fn test_roundtrip_build_validate() {
-        // Construir mensagem, serializar, validar, parses
-        let mut builder = crate::protocol::builder::TLVBuilder::new();
-        builder.add_uint8(0x70, 2).unwrap();
-        builder.add_float(0x30, 3.14).unwrap();
-        builder.add_uint16(0xB0, 42).unwrap();
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
+        builder.add_f32_field(0x10, 3.14).unwrap();
+        builder.add_u16_field(0x20, 42).unwrap();
+        builder.set_seq(7);
 
-        let mut buffer = [0u8; 1093];
+        let mut buffer = [0u8; 1098];
         let size = builder.build(0x11, &mut buffer).unwrap();
 
         // Validar
         let tlv_count = validate_message(&buffer[..size]).unwrap();
         assert_eq!(tlv_count, 3);
+
+        // Validar assinatura
+        assert!(validate_signature_in_message(&buffer[..size], 0x42).is_ok());
+    }
+
+    #[test]
+    fn test_roundtrip_build_parse() {
+        let mut builder = TLVBuilder::new(0x06, 0x42);
+        builder.add_u8_field(0, 2).unwrap();
+        builder.add_f32_field(0x10, 3.14).unwrap();
+        builder.set_seq(10);
+
+        let mut buffer = [0u8; 1098];
+        let _size = builder.build(0x11, &mut buffer).unwrap();
+
+        // Extrair TLV fields (após header, antes de signature+crc)
+        let tlv_count = buffer[6] as usize;
+        let tlv_data_start = ACP_HEADER_SIZE;
+        let mut tlv_data_end = tlv_data_start;
+        for _ in 0..tlv_count {
+            let field_len = buffer[tlv_data_end + 1] as usize;
+            tlv_data_end += TLV_HEADER_SIZE + field_len;
+        }
+
+        let mut output = [TLVField::new(); 32];
+        let count = parse_tlv(&buffer[tlv_data_start..tlv_data_end], &mut output).unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(output[0].id, 0xC0); // u8 type
+        assert_eq!(output[1].id, 0x30); // f32 type
     }
 }

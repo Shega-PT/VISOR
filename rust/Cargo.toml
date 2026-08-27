@@ -1,13 +1,13 @@
 [package]
 name = "visor-protocol"
-version = "2.0.0"
+version = "3.0.0"
 edition = "2021"
 authors = ["ShegaPT"]
-description = "Protocolo TLV binário e Parser FSM para o módulo VISOR do sistema AERUS"
+description = "ACP (AERUS Communication Protocol) v3.0.0 — Protocolo binário e Parser FSM"
 license = "GPL-3.0"
 
 [lib]
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 name = "visor_protocol"
 path = "src/lib.rs"
 
@@ -16,11 +16,16 @@ esp-idf-sys = { version = "0.37", features = ["std"], optional = true }
 
 [features]
 default = ["std"]
-std = ["esp-idf-sys"]
+std = []
 no-std = []
+esp = ["std", "esp-idf-sys"]
+
+[profile.dev]
+panic = "abort"
 
 [profile.release]
 opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"

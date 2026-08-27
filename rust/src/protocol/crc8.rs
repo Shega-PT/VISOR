@@ -1,5 +1,3 @@
-///!
-
 //! # CRC-8/SMBUS — Implementação Puro Rust
 //!
 //! Implementação do algoritmo CRC-8 utilizando o polinómio SMBUS (0x07).
@@ -153,9 +151,9 @@ mod tests {
 
     #[test]
     fn test_crc8_known_vectors() {
-        // Valores conhecidos CRC-8/SMBUS (polinómio 0x07)
-        assert_eq!(calc_crc8(&[0x01, 0x02, 0x03]), 0x46);
-        assert_eq!(calc_crc8(&[0xFF, 0xFF, 0xFF]), 0x86);
+        // Valores conhecidos CRC-8/SMBUS (polinómio 0x07, init 0x00)
+        // Standard test vector: "123456789" should produce 0xF4
+        assert_eq!(calc_crc8(b"123456789"), 0xF4);
         assert_eq!(calc_crc8(&[0x00, 0x00, 0x00, 0x00]), 0x00);
     }
 
@@ -197,7 +195,6 @@ mod tests {
         // Simular CRC de uma mensagem: start(0xAA) + msgID(0x10) + tlvCount(0)
         let header = [0xAA, 0x10, 0x00];
         let crc = calc_crc8(&header);
-        assert!(crc <= 0xFF);
         // CRC não deve ser zero para estes dados específicos
         assert_ne!(crc, 0x00);
     }

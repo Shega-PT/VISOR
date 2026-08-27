@@ -1,47 +1,59 @@
-///!
-
-//! # FFI Parser — Funções extern "C" para Interoperação C/C++
-//!
-//! Este módulo expõe as funções do parser FSM como funções `extern "C"`
-//! para permitir chamadas a partir de código C/C++.
-//!
-//! ## Nota de Segurança
-//!
-//! Todas as funções FFI são `unsafe` e requerem ponteiros válidos.
-//! O parser deve ser criado via `visor_parser_new()` e destruído via
-//! `visor_parser_free()` para gerir a memória corretamente.
+//! # FFI Parser — Funções extern "C" para Interoperação C/C++ (ACP v3.0.0)
 
 use crate::parser::fsm::*;
 use crate::protocol::types::*;
 
+#[cfg(feature = "std")]
+extern crate alloc;
+
 /// Cria um novo parser FSM.
+///
+/// # Arguments
+/// * `key` — Chave de assinatura (XOR key) para validação de mensagens.
 ///
 /// # Returns
 /// Ponteiro para o parser criado, ou NULL em erro.
+#[cfg(feature = "std")]
 #[no_mangle]
-pub extern "C" fn visor_parser_new() -> *mut Parser {
-    let parser = Parser::new();
-    Box::into_raw(Box::new(parser))
+pub extern "C" fn visor_parser_new(key: u8) -> *mut Parser {
+    let parser = Parser::new(key);
+    alloc::boxed::Box::into_raw(alloc::boxed::Box::new(parser))
 }
 
 /// Destrói um parser FSM e liberta a memória.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser a destruir.
+/// * `parser` — Ponteiro para o parser a destruir.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub extern "C" fn visor_parser_free(parser: *mut Parser) {
     if !parser.is_null() {
         unsafe {
-            let _ = Box::from_raw(parser);
+            let _ = alloc::boxed::Box::from_raw(parser);
         }
     }
+}
+
+/// Inicializa um parser existente (no_std-friendly).
+///
+/// # Arguments
+/// * `parser` — Ponteiro para o parser já alocado.
+/// * `key` — Chave de assinatura.
+#[no_mangle]
+pub extern "C" fn visor_parser_init(parser: *mut Parser, key: u8) {
+    if parser.is_null() {
+        return;
+    }
+    let p = unsafe { &mut *parser };
+    p.reset();
+    p.set_key(key);
 }
 
 /// Alimenta um byte ao parser.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
-/// * `byte` - Byte a processar.
+/// * `parser` — Ponteiro para o parser.
+/// * `byte` — Byte a processar.
 ///
 /// # Returns
 /// Código de erro (0 = OK).
@@ -57,7 +69,7 @@ pub extern "C" fn visor_parser_feed(parser: *mut Parser, byte: u8) -> u8 {
 /// Retorna true (1) se uma mensagem completa está disponível.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 #[no_mangle]
 pub extern "C" fn visor_parser_has_message(parser: *const Parser) -> u8 {
     if parser.is_null() {
@@ -70,10 +82,10 @@ pub extern "C" fn visor_parser_has_message(parser: *const Parser) -> u8 {
 /// Retorna ponteiro para a mensagem reconstruída.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 ///
 /// # Returns
-/// Ponteiro para a mensagem TLV, ou NULL se não houver mensagem.
+/// Ponteiro para a mensagem ACP, ou NULL se não houver mensagem.
 #[no_mangle]
 pub extern "C" fn visor_parser_get_message(parser: *const Parser) -> *const TLVMessage {
     if parser.is_null() {
@@ -90,8 +102,8 @@ pub extern "C" fn visor_parser_get_message(parser: *const Parser) -> *const TLVM
 /// Copia a mensagem reconstruída para um buffer de saída.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
-/// * `output` - Ponteiro para o buffer de saída.
+/// * `parser` — Ponteiro para o parser.
+/// * `output` — Ponteiro para o buffer de saída.
 ///
 /// # Returns
 /// 1 em sucesso, 0 em erro.
@@ -111,7 +123,7 @@ pub extern "C" fn visor_parser_copy_message(
 /// Reconhece a mensagem processada.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 #[no_mangle]
 pub extern "C" fn visor_parser_acknowledge(parser: *mut Parser) {
     if parser.is_null() {
@@ -124,7 +136,7 @@ pub extern "C" fn visor_parser_acknowledge(parser: *mut Parser) {
 /// Reseta o parser para o estado inicial.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 #[no_mangle]
 pub extern "C" fn visor_parser_reset(parser: *mut Parser) {
     if parser.is_null() {
@@ -137,8 +149,8 @@ pub extern "C" fn visor_parser_reset(parser: *mut Parser) {
 /// Define o intervalo máximo entre bytes (timeout) em microssegundos.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
-/// * `micros` - Timeout em microssegundos.
+/// * `parser` — Ponteiro para o parser.
+/// * `micros` — Timeout em microssegundos.
 #[no_mangle]
 pub extern "C" fn visor_parser_set_max_frame_gap(parser: *mut Parser, micros: u32) {
     if parser.is_null() {
@@ -151,7 +163,7 @@ pub extern "C" fn visor_parser_set_max_frame_gap(parser: *mut Parser, micros: u3
 /// Verifica se o parser excedeu o timeout.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 ///
 /// # Returns
 /// 1 se em timeout, 0 caso contrário.
@@ -167,7 +179,7 @@ pub extern "C" fn visor_parser_is_timed_out(parser: *const Parser) -> u8 {
 /// Retorna o último erro registado.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 ///
 /// # Returns
 /// Código do erro (0 = OK).
@@ -183,10 +195,10 @@ pub extern "C" fn visor_parser_get_last_error(parser: *const Parser) -> u8 {
 /// Retorna o estado atual da FSM.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 ///
 /// # Returns
-/// Código do estado (0-6).
+/// Código do estado (0-8).
 #[no_mangle]
 pub extern "C" fn visor_parser_get_current_state(parser: *const Parser) -> u8 {
     if parser.is_null() {
@@ -199,7 +211,7 @@ pub extern "C" fn visor_parser_get_current_state(parser: *const Parser) -> u8 {
 /// Retorna o número de mensagens processadas com sucesso.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 #[no_mangle]
 pub extern "C" fn visor_parser_get_success_count(parser: *const Parser) -> u32 {
     if parser.is_null() {
@@ -212,7 +224,7 @@ pub extern "C" fn visor_parser_get_success_count(parser: *const Parser) -> u32 {
 /// Retorna o número de erros de parsing.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
+/// * `parser` — Ponteiro para o parser.
 #[no_mangle]
 pub extern "C" fn visor_parser_get_error_count(parser: *const Parser) -> u32 {
     if parser.is_null() {
@@ -225,8 +237,8 @@ pub extern "C" fn visor_parser_get_error_count(parser: *const Parser) -> u32 {
 /// Ativa ou desativa a saída de debug.
 ///
 /// # Arguments
-/// * `parser` - Ponteiro para o parser.
-/// * `enable` - 1 para ativar, 0 para desativar.
+/// * `parser` — Ponteiro para o parser.
+/// * `enable` — 1 para ativar, 0 para desativar.
 #[no_mangle]
 pub extern "C" fn visor_parser_set_debug(parser: *mut Parser, enable: u8) {
     if parser.is_null() {
@@ -236,10 +248,40 @@ pub extern "C" fn visor_parser_set_debug(parser: *mut Parser, enable: u8) {
     parser.set_debug(enable != 0);
 }
 
+/// Retorna a chave de assinatura do parser.
+///
+/// # Arguments
+/// * `parser` — Ponteiro para o parser.
+///
+/// # Returns
+/// Chave de assinatura (0x00-0xFF).
+#[no_mangle]
+pub extern "C" fn visor_parser_get_key(parser: *const Parser) -> u8 {
+    if parser.is_null() {
+        return 0;
+    }
+    let parser = unsafe { &*parser };
+    parser.get_key()
+}
+
+/// Define a chave de assinatura do parser.
+///
+/// # Arguments
+/// * `parser` — Ponteiro para o parser.
+/// * `key` — Nova chave de assinatura.
+#[no_mangle]
+pub extern "C" fn visor_parser_set_key(parser: *mut Parser, key: u8) {
+    if parser.is_null() {
+        return;
+    }
+    let parser = unsafe { &mut *parser };
+    parser.set_key(key);
+}
+
 /// Converte um estado do parser para string legível.
 ///
 /// # Arguments
-/// * `state` - Código do estado.
+/// * `state` — Código do estado.
 ///
 /// # Returns
 /// Ponteiro para string estática com o nome do estado.
@@ -248,12 +290,14 @@ pub extern "C" fn visor_parser_state_to_string(state: u8) -> *const core::ffi::c
     // Nota: retorna ponteiro para string estática — não libertar
     let s = match state {
         0 => "WAIT_START\0",
-        1 => "WAIT_MSGID\0",
-        2 => "WAIT_TLVCOUNT\0",
+        1 => "WAIT_HEADER\0",
+        2 => "WAIT_TLV_COUNT\0",
         3 => "WAIT_TLV_ID\0",
         4 => "WAIT_TLV_LEN\0",
         5 => "WAIT_TLV_DATA\0",
-        6 => "WAIT_CHECKSUM\0",
+        6 => "WAIT_SIGNATURE\0",
+        7 => "WAIT_CRC16_LO\0",
+        8 => "WAIT_CRC16_HI\0",
         _ => "UNKNOWN\0",
     };
     s.as_ptr() as *const core::ffi::c_char
@@ -262,7 +306,7 @@ pub extern "C" fn visor_parser_state_to_string(state: u8) -> *const core::ffi::c
 /// Converte um código de erro do parser para string legível.
 ///
 /// # Arguments
-/// * `error` - Código do erro.
+/// * `error` — Código do erro.
 ///
 /// # Returns
 /// Ponteiro para string estática com o nome do erro.
@@ -271,12 +315,14 @@ pub extern "C" fn visor_parser_error_to_string(error: u8) -> *const core::ffi::c
     let s = match error {
         0 => "OK\0",
         1 => "ERR_START\0",
-        2 => "ERR_MSGID\0",
-        3 => "ERR_TLV_COUNT\0",
-        4 => "ERR_TLV_ID\0",
-        5 => "ERR_TLV_LEN\0",
-        6 => "ERR_CHECKSUM\0",
-        7 => "ERR_TIMEOUT\0",
+        2 => "ERR_VERSION\0",
+        3 => "ERR_MSGID\0",
+        4 => "ERR_TLV_COUNT\0",
+        5 => "ERR_TLV_ID\0",
+        6 => "ERR_TLV_LEN\0",
+        7 => "ERR_CHECKSUM\0",
+        8 => "ERR_SIGNATURE\0",
+        9 => "ERR_TIMEOUT\0",
         _ => "UNKNOWN\0",
     };
     s.as_ptr() as *const core::ffi::c_char
