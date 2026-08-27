@@ -26,7 +26,7 @@ O VISOR é um módulo quase totalmente autónomo do sistema AERUS. A sua funçã
 ┌─────────────────────────────────────────────────────────┐
 │                    VISOR Module                         │
 ├─────────────────────────────────────────────────────────┤
-│  Video (Main)                                           │
+│ VISOR                                                   │
 │  ├── Camera (OV2640 / StoredVideo)                      │
 │  ├── VideoProcessor (Resize, Filtros, Gamma)            │
 │  ├── AviMjpegWriter (Container AVI + MJPEG)             │
