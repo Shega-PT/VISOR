@@ -265,19 +265,15 @@ void Video::_sendChunks() {
 
 size_t Video::_buildVideoPacket(const VideoChunk& chunk, uint8_t* buffer, size_t size) {
     TLVMessage msg;
-    msg.start_byte = VISOR_START_BYTE;
-    msg.msg_id = VISOR_MSG_VIDEO;
-    msg.tlv_count = 0;
-    msg.checksum = 0;
+    visor_acp_init(&msg, ACP_GROUP_VISOR, ACP_MSG_VIDEO);
+    visor_acp_set_seq(&msg, _nextFrameId);
 
-    // Adicionar campos TLV via FFI Rust
-    visor_add_tlv_uint16(&msg, VISOR_FLD_VIDEO_FRAME_ID, chunk.frameId);
-    visor_add_tlv_uint8(&msg, VISOR_FLD_VIDEO_CHUNK_ID, chunk.chunkId);
-    visor_add_tlv_uint8(&msg, VISOR_FLD_VIDEO_TOTAL, chunk.totalChunks);
-    visor_add_tlv(&msg, VISOR_FLD_VIDEO_PAYLOAD, chunk.data, (uint8_t)chunk.dataLen);
+    visor_add_tlv_uint16(&msg, ACP_FLD_VIDEO_FRAME_ID, chunk.frameId);
+    visor_add_tlv_uint8(&msg, ACP_FLD_VIDEO_CHUNK_ID, chunk.chunkId);
+    visor_add_tlv_uint8(&msg, ACP_FLD_VIDEO_TOTAL, chunk.totalChunks);
+    visor_add_tlv(&msg, ACP_FLD_VIDEO_PAYLOAD, chunk.data, (uint8_t)chunk.dataLen);
 
-    // Serializar mensagem
-    ssize_t result = visor_build_message(&msg, VISOR_MSG_VIDEO, buffer, size);
+    ssize_t result = visor_build_message(&msg, ACP_MSG_VIDEO, 0x00, buffer, size);
     return (result > 0) ? (size_t)result : 0;
 }
 

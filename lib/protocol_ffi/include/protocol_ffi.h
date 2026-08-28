@@ -171,11 +171,11 @@ extern "C" {
 #define ACP_FLD_FS_ACTION       0xC9    /* TYPE=6(u8) + ID=9 */
 #define ACP_FLD_FS_STATE        0xCA    /* TYPE=6(u8) + ID=10 */
 
-/* Vídeo — Tipos mistos */
-#define ACP_FLD_VIDEO_FRAME_ID  0xA0    /* TYPE=5(u16) + ID=0 */
-#define ACP_FLD_VIDEO_CHUNK_ID  0xC3    /* TYPE=6(u8)  + ID=3 */
-#define ACP_FLD_VIDEO_TOTAL     0xCB    /* TYPE=6(u8)  + ID=11 */
-#define ACP_FLD_VIDEO_PAYLOAD   0x00    /* TYPE=0(raw) + ID=0 */
+/* Vídeo — Tipos mistos (compatível com Rust FieldVideo enum) */
+#define ACP_FLD_VIDEO_FRAME_ID  0xB0    /* TYPE=5(u16) + ID=0 — Rust: FieldVideo::FrameId */
+#define ACP_FLD_VIDEO_CHUNK_ID  0xB1    /* TYPE=5(u16) + ID=1 — Rust: FieldVideo::ChunkId */
+#define ACP_FLD_VIDEO_TOTAL     0xB2    /* TYPE=5(u16) + ID=2 — Rust: FieldVideo::TotalChunks */
+#define ACP_FLD_VIDEO_PAYLOAD   0xB3    /* TYPE=5(u16) + ID=3 — Rust: FieldVideo::Payload */
 
 /* ========================================================================
  * COMANDOS

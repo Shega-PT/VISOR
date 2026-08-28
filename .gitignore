@@ -64,3 +64,9 @@ test/*.elf
 # --------------------------------
 sdkconfig
 sdkconfig.old
+
+# --------------------------------
+# Test Integration
+# --------------------------------
+view_video.py
+scripts/generate_test_video.py

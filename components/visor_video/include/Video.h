@@ -43,7 +43,11 @@
 #define VIDEO_MAX_QUEUE_SIZE    50
 
 /** Tamanho máximo de uma frame processada (bytes). */
-#define VIDEO_MAX_FRAME_SIZE    (640 * 480 * 2)  // ~600KB para VGA
+#ifdef BOARD_HAS_PSRAM
+#define VIDEO_MAX_FRAME_SIZE    (640 * 480 * 2)  // ~600KB para VGA (com PSRAM)
+#else
+#define VIDEO_MAX_FRAME_SIZE    (320 * 240 * 2)  // ~150KB para QVGA (sem PSRAM)
+#endif
 
 /** Timeout para frames incompletas em milissegundos. */
 #define VIDEO_FRAGMENT_TIMEOUT_MS  5000
