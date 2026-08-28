@@ -89,6 +89,8 @@ public:
      */
     uint32_t getFps() const;
 
+    bool isInitialized() const { return _initialized; }
+
 private:
     bool _initialized;
     uint16_t _width;

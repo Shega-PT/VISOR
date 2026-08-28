@@ -8,11 +8,12 @@
  */
 
 #include "StoredVideo.h"
+#include <cstring>
+#include <cmath>
 
 #ifdef ESP32
 #include "esp_log.h"
-#include <cstring>
-#include <cmath>
+#include "esp_timer.h"
 
 static const char* TAG = "StoredVideo";
 
@@ -168,7 +169,7 @@ bool StoredVideo::_isCountdownActive() const {
 
 void StoredVideo::_updateCountdown() {
     // Decrementar countdown a cada segundo
-    uint32_t now = millis();
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     if (now - _lastCountdownTime >= 1000) {
         _lastCountdownTime = now;
         if (_countdownValue > 0) {

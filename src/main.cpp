@@ -93,7 +93,10 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "  AERUS Project v3.0.0");
     ESP_LOGI(TAG, "========================================");
 
-    // Configurar UART para USB serial
+    // Configurar UART para USB serial.
+    // O console IDF pode já ter instalado o driver UART0 durante o boot.
+    // Tratamos isso graciosamente: se o driver já existe, reconfiguramos
+    // apenas o baud rate e continuamos.
     const uart_config_t uart_config = {
         .baud_rate = UART_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -105,12 +108,17 @@ extern "C" void app_main(void) {
 
     esp_err_t uart_err = uart_param_config(UART_PORT, &uart_config);
     if (uart_err != ESP_OK) {
-        ESP_LOGE(TAG, "Falha ao configurar UART: %d", uart_err);
-        return;
+        ESP_LOGW(TAG, "uart_param_config falhou (%d), tentando set_baudrate", uart_err);
+        // Se param_config falhou, tentamos apenas mudar o baud rate
+        uart_set_baudrate(UART_PORT, UART_BAUD_RATE);
     }
 
     uart_err = uart_driver_install(UART_PORT, 2048, 2048, 0, NULL, 0);
-    if (uart_err != ESP_OK) {
+    if (uart_err == ESP_ERR_INVALID_STATE) {
+        // Driver já instalado pelo console IDF — reconfiguramos baud rate
+        ESP_LOGW(TAG, "Driver UART0 já instalado (console IDF), a reconfigurar baud rate");
+        uart_set_baudrate(UART_PORT, UART_BAUD_RATE);
+    } else if (uart_err != ESP_OK) {
         ESP_LOGE(TAG, "Falha ao instalar driver UART: %d", uart_err);
         return;
     }
@@ -165,9 +173,14 @@ extern "C" void app_main(void) {
 
     videoModule.setDebug(true);
     ESP_LOGI(TAG, "Módulo de vídeo inicializado");
+    ESP_LOGI(TAG, "Executar: python3 view_video.py");
+    ESP_LOGI(TAG, "A desabilitar logs — dados ACP-only no UART0...");
+
+    // Desabilitar todos os logs ANTES de enviar dados ACP binários
+    // para evitar mistura de texto ESP_LOGI com dados binários no UART0
+    esp_log_level_set("*", ESP_LOG_NONE);
 
     // Enviar packet de inicialização (heartbeat) para o Python reader
-    ESP_LOGI(TAG, "A enviar packet de inicialização...");
     {
         TLVMessage init_msg;
         visor_acp_init(&init_msg, ACP_GROUP_VISOR, ACP_MSG_HEARTBEAT);
@@ -181,10 +194,6 @@ extern "C" void app_main(void) {
     }
 
     // Loop principal
-    ESP_LOGI(TAG, "A iniciar loop principal (target: %d FPS)...", TARGET_FPS);
-    ESP_LOGI(TAG, "Dados ACP a ser enviados via USB serial @ %d baud", UART_BAUD_RATE);
-    ESP_LOGI(TAG, "Executar: python3 scripts/visor_reader.py");
-
     int64_t lastFrameTime = esp_timer_get_time();
 
     while (true) {
@@ -194,18 +203,6 @@ extern "C" void app_main(void) {
         if (elapsed >= FRAME_INTERVAL_MS) {
             // Processar e enviar frame
             videoModule.processAndSend();
-
-            // Estatísticas periódicas
-            static uint32_t statsCounter = 0;
-            statsCounter++;
-            if (statsCounter >= TARGET_FPS * 5) {  // A cada 5 segundos
-                ESP_LOGI(TAG, "Stats: frames=%lu chunks_sent=%lu chunks_dropped=%lu heap=%lu",
-                         videoModule.getFramesProcessed(),
-                         videoModule.getChunksSent(),
-                         videoModule.getChunksDropped(),
-                         (unsigned long)esp_get_free_heap_size());
-                statsCounter = 0;
-            }
 
             lastFrameTime = now;
         }

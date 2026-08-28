@@ -17,7 +17,6 @@ esp-idf-sys = { version = "0.37", features = ["std"], optional = true }
 [features]
 default = ["std"]
 std = []
-no-std = []
 esp = ["std", "esp-idf-sys"]
 
 [profile.dev]

@@ -11,11 +11,11 @@
  */
 
 #include "VideoProcessor.h"
+#include <cstring>
+#include <cmath>
 
 #ifdef ESP32
 #include "esp_log.h"
-#include <cstring>
-#include <cmath>
 
 static const char* TAG = "VideoProcessor";
 

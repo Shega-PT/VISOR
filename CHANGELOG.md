@@ -5,7 +5,58 @@ Todas as alterações notáveis neste projeto são documentadas neste ficheiro.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/),
 e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 
-## [3.0.0] - 2026-08-27
+## [0.2.0] - 2026-08-28
+   **Autor: ShegaPT**
+
+### Fixed
+
+- **view_video.py crash na abertura** — `reader.get_frame()` retornava None causando TypeError no unpack
+- **view_video.py parse_msg() rejeitava todas as mensagens** — check `offset + OVER` incorreto, corrigido para `offset + SIG_SZ + CRC_SZ`
+- **view_video.py decodificação JPEG** — `pygame.image.frombuffer` com dados JPEG como RGB, substituído por `pygame.image.load(io.BytesIO(...))`
+- **Video.cpp stack overflow** — buffers de 153KB alocados na stack, migrados para heap com `malloc()`/`free()`
+- **millis() não existe em ESP-IDF** — substituído por `esp_timer_get_time() / 1000` em Video.cpp e StoredVideo.cpp
+- **CameraOV2640.h missing include** — `framesize_t`/`pixformat_t` não definidos, adicionado `#include "esp_camera.h"`
+- **AviMjpegWriter.cpp offset errado** — dwTotalFrames escrito em offset 20 (era "hdrl"), corrigido para offset 48
+- **AviMjpegWriter.cpp LIST sizes errados** — hdrl=228→208, strl=120→116
+- **AviMjpegWriter.cpp strh dwLength** — nunca atualizado, corrigido no finalize()
+- **AviMjpegWriter.cpp realloc() em SPIRAM** — substituído por malloc()+memcpy()+free() consistente
+- **AviMjpegWriter.cpp _ensureCapacity loop infinito** — guard para _bufferCapacity==0
+- **esp32cam build falha** — conflito esp32-camera em lib_deps vs managed_components, removido de lib_deps
+- **platformio.ini paths inconsistentes** — -L redundante removido, CMakeLists.txt gerencia linkagem
+- **test_transport_camera.cpp** — isActive()→isReady(), falta main(), args incorretos em begin()
+- **test_video_ffi.cpp** — VISOR_FLD_*→ACP_FLD_*, args incorretos em visor_build_message() e visor_parser_new()
+- **rust-toolchain.toml** — target `xtensa-esp32-espidf` em falta
+- **Cargo.toml** — feature `no-std` inútil removida
+- **parser/fsm.rs** — get_timestamp_us() sempre retornava 0 com código desnecessário, simplificado com TODO
+- **main.cpp UART driver conflict** — `uart_driver_install` falhava quando console IDF já tinha UART0; agora trata `ESP_ERR_INVALID_STATE` graciosamente com `uart_set_baudrate()`
+- **view_video.py import inútil** — `import subprocess` removido
+- **view_video.py struct.pack args** — strh em save_avi() tinha 13 args para 12 formatos; reescrito com bytearray field-by-field
+- **view_video.py f.seek(12)** — corrompia marcador "LIST" do AVI; corrigido para `f.seek(16)`
+- **view_video.py reset_input_buffer** — boot logs causavam dessincronização; adicionado flush ao abrir serial
+- **view_video.py _process scanning** — guard para `buf < 3` bytes; impedia loop infinito em buffers pequenos
+- **view_video.py reassembly timeout** — frames incompletos acumulavam-se para sempre; timeout de 5s + cleanup automático
+- **generate_test_video.py f.seek(12)** — mesmo bug de corrupção AVI; corrigido para `f.seek(16)`
+- **test_transport_camera.cpp pinos** — valores AI-Thinker e ESP32-S3 não correspondiam a CameraConfig.h
+
+### Changed
+
+- **Estrutura de pastas** — scripts de teste movidos para `HARDWARE/tests/`
+- **Documentação** — criada pasta `docs/` com GETTING-STARTED.md e HARDWARE-TEST.md
+- **.gitignore** — atualizado: removidos view_video.py e generate_test_video.py da lista ignored; adicionados managed_components/, dependencies.lock, sdkconfig.*
+- **.gitkeep** — criados em docs/, HARDWARE/tests/, lib/protocol_ffi/lib/
+- **Bare except** — substituídos por `except Exception:` em view_video.py
+- **self.buf slices** — otimizados com `del self.buf[:n]` em vez de reatribuição
+
+### Removed
+
+- **VideoFrame struct** — nunca utilizada, removida de Video.h
+- **VideoCompression enum** — nunca utilizada, removida de Video.h
+- **generate_minimal_jpeg()** — dead code removido de generate_test_video.py
+- **visor_reader.py .pyc** — cache órfão removido
+
+---
+
+## [0.1.0] - 2026-08-27
    **Autor: ShegaPT**
 
 ### Added
@@ -58,48 +109,3 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/).
 - **CRC-8 test vector** — Teste esperava 0x46, valor correto é 0xF4
 - **is_safety_bus_id** — Verificava bits errados (priority+src_group em vez de msg_type)
 - **Doc example** — validate_message chamado com 2 argumentos em vez de 1
-
----
-
-## [0.1.0] - 2026-08-27
-   **Autor: ShegaPT**
-
-### Added
-
-- **Protocolo TLV v2.0.0** — Reescrito em Rust com FFI C
-  - `types.rs` — Constantes, enums e structs `#[repr(C)]`
-  - `crc8.rs` — CRC-8/SMBUS puro Rust
-  - `builder.rs` — TLVBuilder para construção e serialização
-  - `codec.rs` — Funções de construção, validação e serialização
-  - `ffi.rs` — Funções `extern "C"` para FFI
-  - `lib.rs` — Módulo principal com re-exports
-- **Parser FSM** — Reescrito em Rust com FFI C
-  - `fsm.rs` — Máquina de estados para reassembly TLV
-  - `ffi.rs` — Funções `extern "C"` do parser
-- **Interface de Transporte** — Callback function pointer
-  - `transport.h` — `TransportInterface` com inline helpers
-  - Substitui LoRa por callback unidirecional
-- **Módulo de Vídeo** — Adaptado para nova arquitetura
-  - `Video.h/.cpp` — Classe principal com pipeline completo
-  - `Camera.h` — Interface abstrata para cameras
-  - `CameraOV2640.h/.cpp` — Driver OV2640 via esp_camera
-  - `StoredVideo.h/.cpp` — Vídeo armazenado para testes
-  - `VideoProcessor.h/.cpp` — Processamento de imagem
-  - `AviMjpegWriter.h/.cpp` — Escritor AVI MJPEG
-  - `CameraConfig.h` — Configuração de pinos da camera
-- **Build System** — PlatformIO + Cargo
-  - `platformio.ini` — Configuração ESP32
-  - `scripts/build_rust.py` — Script de build Rust
-  - `rust/Cargo.toml` — Crate Rust (staticlib)
-  - `rust/rust-toolchain.toml` — Toolchain ESP
-- **Testes** — Unitários (Rust) e Integração (C/C++)
-  - `rust/tests/test_types.rs` — Tipos e constantes
-  - `rust/tests/test_crc8.rs` — CRC-8/SMBUS
-  - `rust/tests/test_builder.rs` — TLVBuilder e FFI
-  - `rust/tests/test_codec.rs` — Codec, validação e FFI
-  - `rust/tests/test_fsm.rs` — Parser FSM e FFI
-  - `test/test_transport_camera.cpp` — Transporte e Camera
-  - `test/test_video_ffi.cpp` — Video e Protocolo FFI
-- **Documentação**
-  - `README.md` — Visão geral, arquitetura e construções
-  - `CHANGELOG.md` — Este ficheiro

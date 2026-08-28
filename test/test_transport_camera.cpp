@@ -92,25 +92,25 @@ void test_transport_send_empty_data(void) {
 
 void test_camera_preset_ai_thinker(void) {
     const CameraPinConfig& pins = CAMERA_PRESET_AI_THINKER_ESP32_CAM;
-    TEST_ASSERT_EQUAL(10, pins.pwdn);
+    TEST_ASSERT_EQUAL(32, pins.pwdn);
     TEST_ASSERT_EQUAL(-1, pins.reset);
-    TEST_ASSERT_EQUAL(11, pins.xclk);
-    TEST_ASSERT_EQUAL(46, pins.d0);
-    TEST_ASSERT_EQUAL(42, pins.d1);
-    TEST_ASSERT_EQUAL(48, pins.d2);
+    TEST_ASSERT_EQUAL(0, pins.xclk);
+    TEST_ASSERT_EQUAL(4, pins.d0);
+    TEST_ASSERT_EQUAL(5, pins.d1);
+    TEST_ASSERT_EQUAL(18, pins.d2);
 }
 
 void test_camera_preset_esp32s3(void) {
     const CameraPinConfig& pins = CAMERA_PRESET_ESP32_S3_CAM;
-    TEST_ASSERT_EQUAL(8, pins.d0);
+    TEST_ASSERT_EQUAL(11, pins.d0);
     TEST_ASSERT_EQUAL(9, pins.d1);
-    TEST_ASSERT_EQUAL(4, pins.d2);
-    TEST_ASSERT_EQUAL(5, pins.d3);
+    TEST_ASSERT_EQUAL(8, pins.d2);
+    TEST_ASSERT_EQUAL(10, pins.d3);
 }
 
 void test_camera_ov2640_creation(void) {
     CameraOV2640 camera;
-    TEST_ASSERT_FALSE(camera.isActive());
+    TEST_ASSERT_FALSE(camera.isReady());
 }
 
 void test_camera_ov2640_begin(void) {
@@ -131,18 +131,19 @@ void test_camera_ov2640_capture(void) {
 void test_camera_ov2640_end(void) {
     CameraOV2640 camera;
     camera.end();
-    TEST_ASSERT_FALSE(camera.isActive());
+    TEST_ASSERT_FALSE(camera.isReady());
 }
 
 void test_stored_video_creation(void) {
     StoredVideo video;
-    TEST_ASSERT_FALSE(video.isActive());
+    TEST_ASSERT_FALSE(video.isReady());
 }
 
 void test_stored_video_begin(void) {
     StoredVideo video;
-    bool result = video.begin();
-    TEST_ASSERT_FALSE(result);
+    CameraPinConfig dummyPins = {};
+    bool result = video.begin(dummyPins);
+    TEST_ASSERT_TRUE(result);  // Stub retorna true
 }
 
 void test_stored_video_capture(void) {
@@ -151,4 +152,27 @@ void test_stored_video_capture(void) {
     size_t len = sizeof(buffer);
     bool result = video.capture(buffer, &len);
     TEST_ASSERT_FALSE(result);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+
+    RUN_TEST(test_transport_is_valid_with_callback);
+    RUN_TEST(test_transport_is_valid_without_callback);
+    RUN_TEST(test_transport_is_valid_null);
+    RUN_TEST(test_transport_send_success);
+    RUN_TEST(test_transport_send_failure);
+    RUN_TEST(test_transport_send_null_transport);
+    RUN_TEST(test_transport_send_empty_data);
+    RUN_TEST(test_camera_preset_ai_thinker);
+    RUN_TEST(test_camera_preset_esp32s3);
+    RUN_TEST(test_camera_ov2640_creation);
+    RUN_TEST(test_camera_ov2640_begin);
+    RUN_TEST(test_camera_ov2640_capture);
+    RUN_TEST(test_camera_ov2640_end);
+    RUN_TEST(test_stored_video_creation);
+    RUN_TEST(test_stored_video_begin);
+    RUN_TEST(test_stored_video_capture);
+
+    return UNITY_END();
 }

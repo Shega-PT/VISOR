@@ -9,7 +9,8 @@ idf_component_register(
         "include"
     REQUIRES
         driver
-        esp_camera
+    PRIV_REQUIRES
+        espressif__esp32-camera
 )
 
 # Linkar library estática do Rust (protocolo TLV)

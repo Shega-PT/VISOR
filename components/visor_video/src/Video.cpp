@@ -16,6 +16,7 @@
 
 #ifdef ESP32
 #include "esp_log.h"
+#include "esp_timer.h"
 #include <cstring>
 
 static const char* TAG = "Video";
@@ -84,23 +85,37 @@ bool Video::processAndSend() {
 
     _status = VideoStatus::RECEIVING;
 
-    // 1. Capturar frame da camera
-    uint8_t rawBuffer[VIDEO_MAX_FRAME_SIZE];
-    size_t rawLen = sizeof(rawBuffer);
+    // 1. Capturar frame da camera — alocar em heap ( VIDEO_MAX_FRAME_SIZE > stack )
+    uint8_t* rawBuffer = (uint8_t*)malloc(VIDEO_MAX_FRAME_SIZE);
+    if (!rawBuffer) {
+        ESP_LOGE(TAG, "Falha ao alocar rawBuffer (%d bytes)", VIDEO_MAX_FRAME_SIZE);
+        _status = VideoStatus::ERROR;
+        return false;
+    }
+    size_t rawLen = VIDEO_MAX_FRAME_SIZE;
 
     if (!_camera->capture(rawBuffer, &rawLen)) {
         ESP_LOGE(TAG, "Falha ao capturar frame");
+        free(rawBuffer);
         _status = VideoStatus::ERROR;
         return false;
     }
 
     // 2. Processar imagem
     _status = VideoStatus::PROCESSING;
-    uint8_t processedBuffer[VIDEO_MAX_FRAME_SIZE];
-    size_t processedLen = sizeof(processedBuffer);
+    uint8_t* processedBuffer = (uint8_t*)malloc(VIDEO_MAX_FRAME_SIZE);
+    if (!processedBuffer) {
+        ESP_LOGE(TAG, "Falha ao alocar processedBuffer (%d bytes)", VIDEO_MAX_FRAME_SIZE);
+        free(rawBuffer);
+        _status = VideoStatus::ERROR;
+        return false;
+    }
+    size_t processedLen = VIDEO_MAX_FRAME_SIZE;
 
     if (!_processor.processFrame(rawBuffer, rawLen, processedBuffer, &processedLen)) {
         ESP_LOGE(TAG, "Falha ao processar frame");
+        free(rawBuffer);
+        free(processedBuffer);
         _status = VideoStatus::ERROR;
         return false;
     }
@@ -116,6 +131,8 @@ bool Video::processAndSend() {
 
     if (!_fragmentFrame(processedBuffer, processedLen, frameId)) {
         ESP_LOGE(TAG, "Falha ao fragmentar frame");
+        free(rawBuffer);
+        free(processedBuffer);
         _status = VideoStatus::ERROR;
         return false;
     }
@@ -125,6 +142,8 @@ bool Video::processAndSend() {
     // 5. Enviar chunks
     _sendChunks();
 
+    free(rawBuffer);
+    free(processedBuffer);
     _status = VideoStatus::IDLE;
     return true;
 }
@@ -198,7 +217,7 @@ bool Video::_fragmentFrame(const uint8_t* data, size_t len, uint16_t frameId) {
         chunk.frameId = frameId;
         chunk.chunkId = (uint8_t)i;
         chunk.totalChunks = (uint8_t)numChunks;
-        chunk.timestamp = millis();
+        chunk.timestamp = (uint32_t)(esp_timer_get_time() / 1000);
 
         size_t offset = i * VIDEO_MAX_CHUNK_SIZE;
         size_t remaining = len - offset;

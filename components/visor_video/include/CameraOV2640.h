@@ -21,6 +21,10 @@
 
 #include "Camera.h"
 
+#ifdef ESP32
+#include "esp_camera.h"
+#endif
+
 #ifdef __cplusplus
 
 class CameraOV2640 : public Camera {
@@ -45,8 +49,13 @@ private:
     size_t _maxFrameSize;
 
     bool _configureSensor();
+#ifdef ESP32
     int _resolutionToEsp(framesize_t* esp_size) const;
     int _formatToEsp(pixformat_t* esp_format) const;
+#else
+    int _resolutionToEsp(void* esp_size) const;
+    int _formatToEsp(void* esp_format) const;
+#endif
 };
 
 #endif /* __cplusplus */

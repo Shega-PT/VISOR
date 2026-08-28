@@ -62,7 +62,7 @@ VISOR/
 │   │       └── ffi.rs           # Parser FFI
 │   ├── tests/
 │   │   └── test_acp.rs          # Testes de integração
-│   └── docs/                    # Documentação do protocolo
+│   └── docs/                    # Documentação do protocolo ACP
 │       ├── ACP-SPECIFICATION.md
 │       ├── FIELD-ID-REFERENCE.md
 │       ├── MESSAGE-ID-REFERENCE.md
@@ -72,6 +72,16 @@ VISOR/
 │       ├── FFI-GUIDE.md
 │       ├── DEVELOPER-TIPS.md
 │       └── EXAMPLES.md
+├── docs/                        # Documentação do VISOR
+│   ├── GETTING-STARTED.md
+│   ├── HARDWARE-TEST.md
+│   ├── api/
+│   └── guia/
+├── HARDWARE/
+│   └── tests/                   # Scripts Python de teste HW
+│       ├── __init__.py
+│       ├── view_video.py
+│       └── generate_test_video.py
 ├── lib/protocol_ffi/
 │   ├── include/protocol_ffi.h
 │   └── lib/
@@ -82,6 +92,7 @@ VISOR/
 │   │   ├── CameraConfig.h
 │   │   ├── Camera.h
 │   │   ├── CameraOV2640.h
+│   │   ├── TestCamera.h
 │   │   ├── StoredVideo.h
 │   │   ├── VideoProcessor.h
 │   │   ├── AviMjpegWriter.h
@@ -198,7 +209,8 @@ FieldID = `[TYPE:3][ID:5]` — 8 tipos × 32 IDs = 256 campos possíveis
 
 ## Documentação
 
-Ver `rust/docs/` para documentação completa:
+### Protocolo ACP (compartilhado)
+Ver `rust/docs/` para documentação completa do protocolo:
 - **ACP-SPECIFICATION.md** — Especificação completa do protocolo
 - **FIELD-ID-REFERENCE.md** — Referência de todos os FieldIDs
 - **MESSAGE-ID-REFERENCE.md** — Referência de todos os MsgIDs
@@ -208,6 +220,11 @@ Ver `rust/docs/` para documentação completa:
 - **FFI-GUIDE.md** — Guia FFI (C/C++)
 - **DEVELOPER-TIPS.md** — Dicas para programadores
 - **EXAMPLES.md** — Exemplos de uso
+
+### VISOR
+Ver `docs/` para documentação específica do módulo:
+- **GETTING-STARTED.md** — Guia de setup e build
+- **HARDWARE-TEST.md** — Guia de testes de hardware
 
 ## Requisitos
 
@@ -219,17 +236,17 @@ Ver `rust/docs/` para documentação completa:
 ## Construção
 
 ```bash
-# Compilar firmware ESP32
-pio run
+# Compilar firmware ESP32 DevKitV1 (teste sem câmara)
+pio run -e esp32dev
+
+# Compilar firmware ESP32-CAM (produção)
+pio run -e esp32cam
 
 # Compilar e flash
-pio run -t upload
+pio run -e esp32dev -t upload
 
 # Testes Rust (host)
 cd rust && RUSTUP_TOOLCHAIN=stable cargo test
-
-# Testes C/C++ (host)
-cd test && g++ -o test_main test_video_ffi.cpp -I../components/visor_video/include -I../lib/protocol_ffi/include && ./test_main
 ```
 
 ## Testes

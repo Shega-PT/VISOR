@@ -65,13 +65,6 @@ enum class VideoStatus : uint8_t {
     ERROR = 4       /**< Erro */
 };
 
-/** Tipo de compressão de vídeo. */
-enum class VideoCompression : uint8_t {
-    NONE = 0,   /**< Sem compressão */
-    JPEG = 1,   /**< JPEG (futuro) */
-    MJPEG = 2   /**< MJPEG (AVI container) */
-};
-
 /* ========================================================================
  * ESTRUTURAS
  * ======================================================================== */
@@ -84,17 +77,6 @@ struct VideoChunk {
     uint8_t data[VIDEO_MAX_CHUNK_SIZE]; /**< Dados do chunk */
     size_t dataLen;         /**< Tamanho dos dados */
     uint32_t timestamp;     /**< Timestamp em ms */
-};
-
-/** Frame de vídeo completa (para reassembly no接收端). */
-struct VideoFrame {
-    uint16_t frameId;       /**< ID da frame */
-    uint8_t totalChunks;    /**< Total de chunks esperados */
-    uint8_t receivedChunks; /**< Chunks recebidos */
-    uint8_t* data;          /**< Buffer de dados da frame */
-    size_t dataLen;         /**< Tamanho total dos dados */
-    uint32_t lastUpdate;    /**< Última atualização em ms */
-    bool complete;          /**< Frame completa */
 };
 
 /* ========================================================================

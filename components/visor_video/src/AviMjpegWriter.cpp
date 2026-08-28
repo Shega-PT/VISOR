@@ -27,11 +27,11 @@
  */
 
 #include "AviMjpegWriter.h"
+#include <cstring>
+#include <cstdlib>
 
 #ifdef ESP32
 #include "esp_log.h"
-#include <cstring>
-#include <cstdlib>
 
 static const char* TAG = "AviMjpegWriter";
 
@@ -131,8 +131,9 @@ bool AviMjpegWriter::writeFrame(const uint8_t* jpegData, size_t jpegLen) {
         return false;
     }
 
-    // Guardar offset para índice
-    size_t frameOffset = _offset - _moviListOffset - 8;  // Offset relativo ao início dos dados 'movi'
+    // Guardar offset para índice (relativo ao início dos dados 'movi')
+    // movi: LIST(4) + size(4) + "movi"(4) = 12 bytes
+    size_t frameOffset = _offset - _moviListOffset - 12;
 
     // Escrever chunk header: "00dc" + size
     _writeBytes((const uint8_t*)"00dc", 4);
@@ -147,15 +148,17 @@ bool AviMjpegWriter::writeFrame(const uint8_t* jpegData, size_t jpegLen) {
         _writeBytes(pad, filler);
     }
 
-    // Atualizar índice
+    // Atualizar índice — usar malloc+memcpy+free (realloc incompatível com SPIRAM)
     if (_indexCount >= _indexCapacity) {
         _indexCapacity *= 2;
-        AviIndexEntry* newIndex = (AviIndexEntry*)realloc(_index,
-            _indexCapacity * sizeof(AviIndexEntry));
+        size_t newSize = _indexCapacity * sizeof(AviIndexEntry);
+        AviIndexEntry* newIndex = (AviIndexEntry*)malloc(newSize);
         if (!newIndex) {
             ESP_LOGE(TAG, "Falha ao redimensionar índice");
             return false;
         }
+        memcpy(newIndex, _index, _indexCount * sizeof(AviIndexEntry));
+        free(_index);
         _index = newIndex;
     }
     _index[_indexCount].offset = (uint32_t)frameOffset;
@@ -192,14 +195,23 @@ bool AviMjpegWriter::finalize(uint8_t* output, size_t* outputSize) {
     }
 
     // Atualizar cabeçalho com contagem final de frames
-    // avih dwTotalFrames está em offset 20 do RIFF
-    if (_buffer && _offset >= 24) {
-        _buffer[20] = (uint8_t)(_frameCount & 0xFF);
-        _buffer[21] = (uint8_t)((_frameCount >> 8) & 0xFF);
-        _buffer[22] = (uint8_t)((_frameCount >> 16) & 0xFF);
-        _buffer[23] = (uint8_t)((_frameCount >> 24) & 0xFF);
+    // Layout AVI: RIFF(12) + LIST+hdrl(12) + avih_tag+size(8) + dwMicroSecPerFrame(4)
+    //   + dwMaxBytesPerSec(4) + dwPaddingGranularity(4) + dwFlags(4) = offset 48
+    // avih dwTotalFrames está no offset 48 do RIFF
+    if (_buffer && _offset >= 52) {
+        _buffer[48] = (uint8_t)(_frameCount & 0xFF);
+        _buffer[49] = (uint8_t)((_frameCount >> 8) & 0xFF);
+        _buffer[50] = (uint8_t)((_frameCount >> 16) & 0xFF);
+        _buffer[51] = (uint8_t)((_frameCount >> 24) & 0xFF);
 
-        // strh dwLength está no offset correspondente
+        // strh dwLength offset: RIFF(12) + hdrl_LIST(12) + avih(64) + strl_LIST(12)
+        //   + strh_tag(4) + strh_size(4) + vids(4) + MJPG(4) + dwFlags(4) + wPriority(2)
+        //   + wLanguage(2) + dwInitialFrames(4) + dwScale(4) + dwRate(4) + dwStart(4) = 140
+        _buffer[140] = (uint8_t)(_frameCount & 0xFF);
+        _buffer[141] = (uint8_t)((_frameCount >> 8) & 0xFF);
+        _buffer[142] = (uint8_t)((_frameCount >> 16) & 0xFF);
+        _buffer[143] = (uint8_t)((_frameCount >> 24) & 0xFF);
+
         // Atualizar também o tamanho total do RIFF
         uint32_t riffSize = (uint32_t)(totalSize - 8);
         _buffer[4] = (uint8_t)(riffSize & 0xFF);
@@ -238,6 +250,9 @@ uint16_t AviMjpegWriter::getHeight() const { return _height; }
 uint32_t AviMjpegWriter::getFps() const { return _fps; }
 
 bool AviMjpegWriter::_ensureCapacity(size_t additionalBytes) {
+    if (!_buffer || _bufferCapacity == 0) {
+        return false;  // Buffer não inicializado
+    }
     if (_offset + additionalBytes <= _bufferCapacity) {
         return true;
     }
@@ -245,8 +260,11 @@ bool AviMjpegWriter::_ensureCapacity(size_t additionalBytes) {
     while (newSize < _offset + additionalBytes) {
         newSize *= 2;
     }
-    uint8_t* newBuffer = (uint8_t*)realloc(_buffer, newSize);
+    // Usar malloc+memcpy+free (realloc incompatível com SPIRAM)
+    uint8_t* newBuffer = (uint8_t*)malloc(newSize);
     if (!newBuffer) return false;
+    memcpy(newBuffer, _buffer, _offset);
+    free(_buffer);
     _buffer = newBuffer;
     _bufferCapacity = newSize;
     return true;
@@ -261,9 +279,9 @@ void AviMjpegWriter::_writeHeader() {
     _writeDword(0);  // Placeholder para tamanho total
     _writeBytes((const uint8_t*)"AVI ", 4);
 
-    // hdrl LIST
+    // hdrl LIST — tamanho: "hdrl"(4) + avih(64) + strl_LIST(116) + odml_LIST(24) = 208
     _writeBytes((const uint8_t*)"LIST", 4);
-    _writeDword(228);  // Tamanho do hdrl
+    _writeDword(208);  // Tamanho do hdrl
     _writeBytes((const uint8_t*)"hdrl", 4);
 
     // avih (Main AVI Header) — 56 bytes de dados
@@ -284,9 +302,9 @@ void AviMjpegWriter::_writeHeader() {
     _writeDword(0);                // dwReserved[2]
     _writeDword(0);                // dwReserved[3]
 
-    // strl LIST
+    // strl LIST — tamanho: "strl"(4) + strh(64) + strf(48) = 116
     _writeBytes((const uint8_t*)"LIST", 4);
-    _writeDword(120);  // Tamanho do strl
+    _writeDword(116);  // Tamanho do strl
     _writeBytes((const uint8_t*)"strl", 4);
 
     // strh (Stream Header) — 56 bytes de dados

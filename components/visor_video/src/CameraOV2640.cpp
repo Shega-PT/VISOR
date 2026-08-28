@@ -11,6 +11,7 @@
  */
 
 #include "CameraOV2640.h"
+#include <cstring>
 
 #ifdef ESP32
 #include "esp_camera.h"
@@ -261,6 +262,6 @@ bool CameraOV2640::isReady() const { return false; }
 size_t CameraOV2640::getMaxFrameSize() const { return _maxFrameSize; }
 void CameraOV2640::end() { _initialized = false; }
 bool CameraOV2640::_configureSensor() { return false; }
-int CameraOV2640::_resolutionToEsp(framesize_t*) const { return -1; }
-int CameraOV2640::_formatToEsp(pixformat_t*) const { return -1; }
+int CameraOV2640::_resolutionToEsp(void*) const { return -1; }
+int CameraOV2640::_formatToEsp(void*) const { return -1; }
 #endif

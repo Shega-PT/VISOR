@@ -3,6 +3,11 @@
 # GPLv3 — ShegaPT
 # ============================================================================
 
+#---------------------------------
+# Componentes
+#---------------------------------
+components/
+
 # --------------------------------
 # Rust — build artifacts
 # --------------------------------
@@ -21,7 +26,20 @@ rust/Cargo.lock
 # --------------------------------
 build/
 out/
-lib/protocol_ffi/lib/
+lib/protocol_ffi/lib/*.a
+lib/protocol_ffi/lib/.gitkeep
+
+# --------------------------------
+# IDF managed components (re Downloads automaticos)
+# --------------------------------
+managed_components/
+dependencies.lock
+
+# --------------------------------
+# venv
+# --------------------------------
+venv/
+.venv/
 
 # --------------------------------
 # IDE / Editor
@@ -43,12 +61,22 @@ Thumbs.db
 # --------------------------------
 __pycache__/
 *.py[cod]
+*.pyc
 
 # --------------------------------
 # Logs
 # --------------------------------
 *.log
 *.tmp
+
+# --------------------------------
+# sdkconfig (gerado pelo IDF)
+# --------------------------------
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults
+sdkconfig.esp32cam
+sdkconfig.esp32dev
 
 # --------------------------------
 # Test binaries
@@ -58,15 +86,3 @@ test/test_transport_camera
 test/test_video_ffi
 test/*.o
 test/*.elf
-
-# --------------------------------
-# ESP-IDF
-# --------------------------------
-sdkconfig
-sdkconfig.old
-
-# --------------------------------
-# Test Integration
-# --------------------------------
-view_video.py
-scripts/generate_test_video.py

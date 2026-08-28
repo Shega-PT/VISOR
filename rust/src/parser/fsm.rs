@@ -481,15 +481,9 @@ impl Parser {
     }
 
     /// Obtém o timestamp atual em microssegundos.
+    /// TODO: Integrar com esp_timer via FFI para timeout real do parser
     fn get_timestamp_us(&self) -> u64 {
-        #[cfg(feature = "std")]
-        {
-            0 // Será integrado com esp_timer
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            0
-        }
+        0
     }
 }
 

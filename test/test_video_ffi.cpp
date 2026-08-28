@@ -24,12 +24,12 @@ void tearDown(void) {}
 
 void test_video_processor_creation(void) {
     VideoProcessor processor;
-    TEST_ASSERT_FALSE(processor.isActive());
+    TEST_ASSERT_FALSE(processor.isInitialized());
 }
 
-void test_avi_writer_creation(void) {
+void test_avi_writer_not_initialized(void) {
     AviMjpegWriter writer;
-    TEST_ASSERT_FALSE(writer.isActive());
+    TEST_ASSERT_FALSE(writer.isInitialized());
 }
 
 void test_video_creation(void) {
@@ -89,7 +89,7 @@ void test_ffi_build_message(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
     msg.start_byte = VISOR_START_BYTE;
-    ssize_t result = visor_build_message(&msg, VISOR_MSG_HEARTBEAT, nullptr, 0);
+    ssize_t result = visor_build_message(&msg, VISOR_MSG_HEARTBEAT, 0x00, nullptr, 0);
     TEST_ASSERT_TRUE(result <= 0);
 }
 
@@ -100,7 +100,7 @@ void test_ffi_validate_message_valid(void) {
     msg.msg_id = VISOR_MSG_HEARTBEAT;
     msg.tlv_count = 0;
     uint8_t buffer[64];
-    ssize_t built = visor_build_message(&msg, VISOR_MSG_HEARTBEAT, buffer, sizeof(buffer));
+    ssize_t built = visor_build_message(&msg, VISOR_MSG_HEARTBEAT, 0x00, buffer, sizeof(buffer));
     TEST_ASSERT_TRUE(built > 0);
     uint8_t result = visor_validate_message(buffer, (size_t)built);
     TEST_ASSERT_NOT_EQUAL(0xFF, result);
@@ -115,35 +115,35 @@ void test_ffi_validate_message_invalid(void) {
 void test_ffi_add_tlv_uint8(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
-    visor_add_tlv_uint8(&msg, VISOR_FLD_VIDEO_CHUNK_ID, 5);
+    visor_add_tlv_uint8(&msg, ACP_FLD_VIDEO_CHUNK_ID, 5);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
 void test_ffi_add_tlv_uint16(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
-    visor_add_tlv_uint16(&msg, VISOR_FLD_VIDEO_FRAME_ID, 42);
+    visor_add_tlv_uint16(&msg, ACP_FLD_VIDEO_FRAME_ID, 42);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
 void test_ffi_add_tlv_uint32(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
-    visor_add_tlv_uint32(&msg, VISOR_FLD_FREE_HEAP, 0xDEADBEEF);
+    visor_add_tlv_uint32(&msg, ACP_FLD_SYS_FREE_HEAP, 0xDEADBEEF);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
 void test_ffi_add_tlv_int32(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
-    visor_add_tlv_int32(&msg, VISOR_FLD_LOOP_TIME, -12345);
+    visor_add_tlv_int32(&msg, ACP_FLD_FLIGHT_LOOP, -12345);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
 void test_ffi_add_tlv_float(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
-    visor_add_tlv_float(&msg, VISOR_FLD_GPS_LAT, 37.7749f);
+    visor_add_tlv_float(&msg, ACP_FLD_GPS_LAT, 37.7749f);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
@@ -151,7 +151,7 @@ void test_ffi_add_tlv_raw(void) {
     TLVMessage msg;
     memset(&msg, 0, sizeof(msg));
     uint8_t data[] = {0x01, 0x02, 0x03};
-    visor_add_tlv(&msg, VISOR_FLD_VIDEO_PAYLOAD, data, 3);
+    visor_add_tlv(&msg, ACP_FLD_VIDEO_PAYLOAD, data, 3);
     TEST_ASSERT_EQUAL(1, msg.tlv_count);
 }
 
@@ -189,20 +189,20 @@ void test_ffi_is_valid_msg_id(void) {
 }
 
 void test_ffi_is_valid_field_id(void) {
-    TEST_ASSERT_EQUAL(1, visor_is_valid_field_id(VISOR_FLD_GPS_LAT));
+    TEST_ASSERT_EQUAL(1, visor_is_valid_field_id(ACP_FLD_GPS_LAT));
     TEST_ASSERT_EQUAL(0, visor_is_valid_field_id(0xFF));
 }
 
 void test_ffi_get_msg_priority(void) {
-    TEST_ASSERT_EQUAL(VISOR_PRIORITY_SUPER_CRITICAL, visor_get_msg_priority(VISOR_MSG_FAILSAFE, 0));
-    TEST_ASSERT_EQUAL(VISOR_PRIORITY_HIGH, visor_get_msg_priority(VISOR_MSG_COMMAND, 0));
-    TEST_ASSERT_EQUAL(VISOR_PRIORITY_NORMAL, visor_get_msg_priority(VISOR_MSG_HEARTBEAT, 0));
-    TEST_ASSERT_EQUAL(VISOR_PRIORITY_LOW, visor_get_msg_priority(VISOR_MSG_VIDEO, 0));
-    TEST_ASSERT_EQUAL(VISOR_PRIORITY_SUPER_LOW, visor_get_msg_priority(VISOR_MSG_DEBUG, 0));
+    TEST_ASSERT_EQUAL(ACP_PRIORITY_SUPER_CRITICAL, visor_get_msg_priority(VISOR_MSG_FAILSAFE, 0));
+    TEST_ASSERT_EQUAL(ACP_PRIORITY_HIGH, visor_get_msg_priority(VISOR_MSG_COMMAND, 0));
+    TEST_ASSERT_EQUAL(ACP_PRIORITY_MEDIUM, visor_get_msg_priority(VISOR_MSG_HEARTBEAT, 0));
+    TEST_ASSERT_EQUAL(ACP_PRIORITY_LOW, visor_get_msg_priority(VISOR_MSG_VIDEO, 0));
+    TEST_ASSERT_EQUAL(ACP_PRIORITY_LOW, visor_get_msg_priority(VISOR_MSG_DEBUG, 0));
 }
 
 void test_ffi_parser_lifecycle(void) {
-    Parser* parser = visor_parser_new();
+    Parser* parser = visor_parser_new(0x00);
     TEST_ASSERT_NOT_NULL(parser);
 
     TEST_ASSERT_EQUAL(0, visor_parser_has_message(parser));
@@ -223,7 +223,7 @@ int main(void) {
     UNITY_BEGIN();
 
     RUN_TEST(test_video_processor_creation);
-    RUN_TEST(test_avi_writer_creation);
+    RUN_TEST(test_avi_writer_not_initialized);
     RUN_TEST(test_video_creation);
     RUN_TEST(test_video_set_enabled);
     RUN_TEST(test_video_process_and_send);
