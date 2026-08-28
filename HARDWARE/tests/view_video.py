@@ -117,7 +117,7 @@ def parse_msg(buf):
     if buf[0] != START or buf[1] != VER:
         return None
 
-    msg_id = buf[3]
+    msg_id = buf[2]
     tlv_count = buf[6]
     offset = HDR
     tlvs = []
@@ -133,7 +133,6 @@ def parse_msg(buf):
         tlvs.append((fid, flen, fdata))
         offset += 2 + flen
 
-    # Apenas signature (1 byte) + CRC16 (2 bytes) apos TLVs
     if offset + SIG_SZ + CRC_SZ > len(buf):
         return None
 
@@ -145,7 +144,7 @@ def parse_msg(buf):
 
     return {
         'msg_id': msg_id,
-        'seq': buf[4] | (buf[5] << 8),
+        'seq': buf[3] | (buf[4] << 8),
         'tlvs': tlvs,
         'sig': sig,
         'crc_ok': computed_crc == expected_crc,
@@ -270,9 +269,14 @@ class SerialReader:
     def _loop(self):
         while self.running:
             try:
-                n = self.ser.in_waiting
+                ser = self.ser
+                if ser is None:
+                    time.sleep(0.01)
+                    continue
+
+                n = ser.in_waiting
                 if n > 0:
-                    data = self.ser.read(n)
+                    data = ser.read(n)
                     with self._lock:
                         self.buf.extend(data)
                     self._process()
@@ -282,31 +286,83 @@ class SerialReader:
                 time.sleep(0.05)
 
     def _process(self):
-        while len(self.buf) >= 4:
-            pkt_len = struct.unpack('<I', self.buf[:4])[0]
-            if pkt_len < OVER or pkt_len > 1098:
-                idx = self.buf.find(START, 1, min(len(self.buf), 256))
-                if idx > 0:
-                    del self.buf[:idx]
-                elif len(self.buf) > 3:
-                    del self.buf[:-3]
-                else:
-                    break
-                continue
-
-            if len(self.buf) < 4 + pkt_len:
+        while len(self.buf) >= OVER:
+            # Procurar pelo byte START (0xAA)
+            idx = self.buf.find(START)
+            if idx < 0:
+                # Se não encontrar START, limpar buffer se muito grande
+                if len(self.buf) > 1024:
+                    self.buf = bytearray()
                 break
 
-            msg_buf = bytes(self.buf[4:4+pkt_len])
-            del self.buf[:4+pkt_len]
+            # Verificar se temos bytes suficientes a partir do START
+            if len(self.buf) - idx < OVER:
+                break
 
-            if msg_buf[0] == START:
-                msg = parse_msg(msg_buf)
-                if msg:
-                    jpeg, info = self.reasm.feed(msg)
-                    if info:
-                        self.last_info = info
+            # Verificar START + VER
+            if idx + 1 >= len(self.buf) or self.buf[idx+1] != VER:
+                # Não é início de mensagem, remover byte e continuar
+                del self.buf[:idx+1]
+                continue
 
+            # Tentar parse a mensagem a partir do START
+            msg, consumed = self._parse_msg_with_len(self.buf[idx:])
+            if msg and consumed > 0:
+                jpeg, info = self.reasm.feed(msg)
+                if info:
+                    self.last_info = info
+                # Remover a mensagem processada do buffer
+                del self.buf[:idx + consumed]
+            else:
+                # Mensagem inválida, remover START e continuar
+                del self.buf[:idx + 1]
+
+    # --- Novo método auxiliar para parse com retorno de comprimento ---
+    def _parse_msg_with_len(self, buf):
+        """Parse ACP e retorna (msg_dict, bytes_consumidos)."""
+        if len(buf) < OVER:
+            return None, 0
+        if buf[0] != START or buf[1] != VER:
+            return None, 0
+
+        msg_id = buf[2]
+        tlv_count = buf[6]
+        offset = HDR
+        tlvs = []
+
+        for _ in range(tlv_count):
+            if offset + 2 > len(buf):
+                return None, 0
+            fid = buf[offset]
+            flen = buf[offset+1]
+            if offset + 2 + flen > len(buf):
+                return None, 0
+            fdata = bytes(buf[offset+2:offset+2+flen])
+            tlvs.append((fid, flen, fdata))
+            offset += 2 + flen
+
+        if offset + SIG_SZ + CRC_SZ > len(buf):
+            return None, 0
+
+        sig = buf[offset]
+        crc_lo = buf[offset+1]
+        crc_hi = buf[offset+2]
+        expected_crc = (crc_hi << 8) | crc_lo
+        computed_crc = crc16(bytes(buf[:offset+1]))
+
+        # Bytes consumidos = até ao fim do CRC (sig + 2 bytes CRC)
+        consumed = offset + SIG_SZ + CRC_SZ
+
+        return {
+            'msg_id': msg_id,
+            'seq': buf[3] | (buf[4] << 8),
+            'tlvs': tlvs,
+            'sig': sig,
+            'crc_ok': computed_crc == expected_crc,
+            'crc_expected': expected_crc,
+            'crc_computed': computed_crc,
+        }, consumed
+    
     def get_frame(self):
         return self.reasm.get_frame()
 
@@ -492,7 +548,7 @@ def main():
                 fps_counter = 0
                 last_fps_time = now
 
-            if use_pygame and screen:
+            if use_pygame and screen is not None and font is not None and clock is not None:
                 screen.fill((0,0,0))
                 if current_jpeg:
                     try:
