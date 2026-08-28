@@ -46,7 +46,7 @@ static const char* TAG = "VISOR";
 
 /** UART para envio de dados (UART0 = USB Serial). */
 #define UART_PORT           UART_NUM_0
-#define UART_BAUD_RATE      921600
+#define UART_BAUD_RATE      115200
 
 /** Tamanho do buffer de envio. */
 #define SEND_BUFFER_SIZE    1024

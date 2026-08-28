@@ -286,83 +286,38 @@ class SerialReader:
                 time.sleep(0.05)
 
     def _process(self):
-        while len(self.buf) >= OVER:
-            # Procurar pelo byte START (0xAA)
-            idx = self.buf.find(START)
-            if idx < 0:
-                # Se não encontrar START, limpar buffer se muito grande
-                if len(self.buf) > 1024:
-                    self.buf = bytearray()
-                break
+        while len(self.buf) >= 4:  # Precisamos de pelo menos 4 bytes para o comprimento
+            # Ler os 4 bytes de comprimento (little-endian)
+            msg_len = struct.unpack('<I', self.buf[:4])[0]
 
-            # Verificar se temos bytes suficientes a partir do START
-            if len(self.buf) - idx < OVER:
-                break
-
-            # Verificar START + VER
-            if idx + 1 >= len(self.buf) or self.buf[idx+1] != VER:
-                # Não é início de mensagem, remover byte e continuar
-                del self.buf[:idx+1]
+            # Validar comprimento (mínimo = OVER, máximo = 1098)
+            if msg_len < OVER or msg_len > 1098:
+                # Comprimento inválido, procurar por START (0xAA) para ressincronizar
+                idx = self.buf.find(START, 1, min(len(self.buf), 256))
+                if idx > 0:
+                    del self.buf[:idx]
+                elif len(self.buf) > 3:
+                    del self.buf[:-3]
+                else:
+                    break
                 continue
 
-            # Tentar parse a mensagem a partir do START
-            msg, consumed = self._parse_msg_with_len(self.buf[idx:])
-            if msg and consumed > 0:
-                jpeg, info = self.reasm.feed(msg)
-                if info:
-                    self.last_info = info
-                # Remover a mensagem processada do buffer
-                del self.buf[:idx + consumed]
-            else:
-                # Mensagem inválida, remover START e continuar
-                del self.buf[:idx + 1]
+            # Verificar se temos dados suficientes (4 + msg_len)
+            if len(self.buf) < 4 + msg_len:
+                break
 
-    # --- Novo método auxiliar para parse com retorno de comprimento ---
-    def _parse_msg_with_len(self, buf):
-        """Parse ACP e retorna (msg_dict, bytes_consumidos)."""
-        if len(buf) < OVER:
-            return None, 0
-        if buf[0] != START or buf[1] != VER:
-            return None, 0
+            # Extrair a mensagem ACP (sem os 4 bytes de comprimento)
+            msg_buf = bytes(self.buf[4:4+msg_len])
+            del self.buf[:4+msg_len]  # Remover do buffer
 
-        msg_id = buf[2]
-        tlv_count = buf[6]
-        offset = HDR
-        tlvs = []
+            # Parse a mensagem ACP
+            if msg_buf[0] == START:
+                msg = parse_msg(msg_buf)
+                if msg:
+                    jpeg, info = self.reasm.feed(msg)
+                    if info:
+                        self.last_info = info
 
-        for _ in range(tlv_count):
-            if offset + 2 > len(buf):
-                return None, 0
-            fid = buf[offset]
-            flen = buf[offset+1]
-            if offset + 2 + flen > len(buf):
-                return None, 0
-            fdata = bytes(buf[offset+2:offset+2+flen])
-            tlvs.append((fid, flen, fdata))
-            offset += 2 + flen
-
-        if offset + SIG_SZ + CRC_SZ > len(buf):
-            return None, 0
-
-        sig = buf[offset]
-        crc_lo = buf[offset+1]
-        crc_hi = buf[offset+2]
-        expected_crc = (crc_hi << 8) | crc_lo
-        computed_crc = crc16(bytes(buf[:offset+1]))
-
-        # Bytes consumidos = até ao fim do CRC (sig + 2 bytes CRC)
-        consumed = offset + SIG_SZ + CRC_SZ
-
-        return {
-            'msg_id': msg_id,
-            'seq': buf[3] | (buf[4] << 8),
-            'tlvs': tlvs,
-            'sig': sig,
-            'crc_ok': computed_crc == expected_crc,
-            'crc_expected': expected_crc,
-            'crc_computed': computed_crc,
-        }, consumed
-    
     def get_frame(self):
         return self.reasm.get_frame()
 
@@ -462,7 +417,7 @@ def save_avi(filename, frames, w, h, fps=10):
 def main():
     ap = argparse.ArgumentParser(description='VISOR — Visualizador de Video ACP via USB')
     ap.add_argument('--port', default=None, help='Porta serial (auto-detect se omitido)')
-    ap.add_argument('--baud', type=int, default=921600, help='Baud rate (default: 921600)')
+    ap.add_argument('--baud', type=int, default=115200, help='Baud rate (default: 115200)')
     ap.add_argument('--save', default=None, help='Guardar video como AVI')
     ap.add_argument('--width', type=int, default=160, help='Largura (default: 160)')
     ap.add_argument('--height', type=int, default=120, help='Altura (default: 120)')

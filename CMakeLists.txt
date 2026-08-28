@@ -1,3 +1,5 @@
 cmake_minimum_required(VERSION 3.16.0)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(VISOR)
+set(EXTRA_COMPONENT_DIRS $ENV{IDF_PATH}/examples/common_components/esp_partition_table)
+spiffs_create_partition_image(storage ${CMAKE_BINARY_DIR}/storage.bin 0x10000)
