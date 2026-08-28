@@ -17,6 +17,6 @@ idf_component_register(
 set(RUST_LIB_DIR "${CMAKE_SOURCE_DIR}/lib/protocol_ffi/lib")
 if(EXISTS "${RUST_LIB_DIR}/libvisor_protocol.a")
     add_prebuilt_library(rust_protocol "${RUST_LIB_DIR}/libvisor_protocol.a" REQUIRES "")
-    target_link_libraries(${COMPONENT_LIB} PUBLIC rust_protocol)
+    target_link_libraries(${COMPONENT_LIB} PRIVATE visor_protocol)
     target_include_directories(${COMPONENT_LIB} PUBLIC "${CMAKE_SOURCE_DIR}/lib/protocol_ffi/include")
 endif()
